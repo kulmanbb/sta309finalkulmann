@@ -1,0 +1,218 @@
+---
+title: "Untitled"
+author: "Bradley Kulmann"
+date: "2025-12-11"
+output: html_document
+---
+
+```
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(tidyverse)
+library(caret)
+library(corrplot)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(readxl)
+```
+
+
+# Part 1
+
+```{r}
+df <- read.csv("/Users/bradleykulmann/Downloads/Untitled spreadsheet - Sheet1.csv")
+```
+
+```{r}
+names(df) <- df[1, ]
+df <- df[-1, ]
+
+data_clean <- df %>%
+  select(W, PF, PA, SoS, PD, SRS, OSRS) %>%
+  drop_na() %>%
+  mutate_all(as.numeric)
+```
+
+```{r}
+response_variable <- "W"
+predictors <- c("PF", "PA", "SoS", "PD", "SRS", "OSRS")
+predictors_subset <- c("PF", "PA", "SoS")
+
+print(head(data_clean))
+print(str(data_clean))
+```
+
+
+#Part 2
+
+```{r}
+p1pf <- data_clean %>%
+  ggplot(aes(x = PF, y = W)) +
+  geom_point(color = "blue", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Relationship between Wins and Points For",
+    subtitle = "Strong positive correlation: More points scored leads to more wins.",
+    x = "Points For (PF)",
+    y = "Wins (W)"
+  )
+```
+
+```{r}
+p2_pa <- data_clean %>%
+  ggplot(aes(x = PA, y = W)) +
+  geom_point(color = "green", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Relationship between Wins and Points Against",
+    subtitle = "Strong negative correlation: Fewer points allowed leads to more wins.",
+    x = "Points Against (PA)",
+    y = "Wins (W)"
+  )
+```
+
+```{r}
+p3_sos <- data_clean %>%
+  ggplot(aes(x = SoS, y = W)) +
+  geom_point(color = "orange", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Relationship between Wins and Strength of Schedule",
+    subtitle = "Weak correlation: SoS has a minimal direct effect on the number of wins.",
+    x = "Strength of Schedule (SoS)",
+    y = "Wins (W)"
+  )
+```
+
+```{r}
+p4_pd <- data_clean %>%
+  ggplot(aes(x = PD, y = W)) +
+  geom_point(color = "purple", alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Relationship between Wins and Point Differential",
+    subtitle = "Very strong correlation: PD is highly predictive for Wins.",
+    x = "Point Differential (PD)",
+    y = "Wins (W)"
+  )
+```
+
+```{r}
+matrix <- cor(data_clean)
+```
+
+```{r}
+corrplot(matrix, method = "color", type = "upper",
+         order = "hclust", tl.col = "black", tl.srt = 45,
+         addCoef.col = "black", number.cex = 0.7,
+         main = "\n\nCorrelation Matrix of Response (W) and Predictors")
+
+print(p1pf)
+print(p2_pa)
+print(p3_sos)
+print(p4_pd)
+```
+
+```{r}
+train_control <- trainControl(
+  method = "cv",
+  number = 5, 
+  verboseIter = FALSE,
+  savePredictions = "final"
+)
+f_full <- as.formula(paste("W ~", paste(predictors, collapse = " + ")))
+f_subset <- as.formula(paste("W ~", paste(predictors_subset, collapse = " + ")))
+
+```
+
+```{r}
+set.seed(42)
+model_lm_full <- train(
+  f_full,
+  data = data_clean,
+  method = "lm",
+  trControl = train_control
+)
+```
+
+```{r}
+set.seed(42)
+model_ridge_subset <- train(
+  x = data_clean %>% select(all_of(predictors_subset)),
+  y = data_clean$W,
+  method = "glmnet",
+  trControl = train_control,
+  tuneGrid = expand.grid(alpha = 0, lambda = 10^seq(-3, 1, length.out = 10)) # alpha=0 for Ridge
+)
+```
+
+```{r}
+set.seed(42)
+model_tree_full <- train(
+  f_full,
+  data = data_clean,
+  method = "rpart",
+  trControl = train_control
+)
+```
+
+```{r}
+set.seed(42)
+model_rf_full <- train(
+  f_full,
+  data = data_clean,
+  method = "rf",
+  trControl = train_control,
+  tuneLength = 3 # Reduce tuning length for faster runtime
+)
+```
+
+
+```{r}
+set.seed(42)
+model_knn_subset <- train(
+  x = data_clean %>% select(all_of(predictors_subset)),
+  y = data_clean$W,
+  method = "knn",
+  trControl = train_control,
+  preProcess = c("center", "scale")
+)
+```
+
+# Part 4
+
+```{r}
+results_comparison <- resamples(list(
+  `Linear (Full)` = model_lm_full,
+  `Ridge (Subset)` = model_ridge_subset,
+  `Decision Tree (Full)` = model_tree_full,
+  `Random Forest (Full)` = model_rf_full,
+  `KNN (Subset)` = model_knn_subset
+))
+```
+
+
+```{r}
+print(summary(results_comparison)$statistics$RMSE)
+
+
+bwplot(results_comparison, metric = "RMSE",
+       main = "Model Performance Comparison (5-Fold CV RMSE)")
+```
+
+#Ridge and random forest are the best performing models because they have the lowest RMSE. They take PF, which is the best metric for determining wins, without distracting noise from other variables. Points for and point difference has a positive impact on win percentage while points againstand strength of schedule had the opposite effect. 
+
+
+
+
+
+
+
